@@ -24,14 +24,15 @@ O_LEVEL = -O2
 
 all:
 	@gcc $(O_LEVEL) $(FLAGS) -c main.c -o main.o
-	@nasm -f elf64 my_printf.asm -o my_printf.o
-	@gcc -Wl,-z,defs -o my_printf my_printf.o main.o
-
+	@nasm -Werror -f elf64 my_printf.asm -o my_printf.o
+	@gcc -o my_printf my_printf.o main.o
+# -Wl,-z,defs
 san:
 	@gcc $(O_LEVEL) $(ASAN_FLAGS) $(FLAGS) -c main.c -o main.o
-	@nasm -f elf64 my_printf.asm -o my_printf.o
-	@gcc -Wl,-z,defs -fsanitize=address -o my_printf my_printf.o main.o
+	@nasm -Werror -f elf64 my_printf.asm -o my_printf.o
+	@gcc -fsanitize=address -o my_printf my_printf.o main.o
 #-L/lib64 -lpthread -lm
+#-Wl,-z,defs
 
 remove:
 	rm my_printf.o main.o
