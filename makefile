@@ -35,9 +35,9 @@ all:
 	@$(CC) $(ASAN_FLAGS) $(LIB) -o my_printf my_printf.o main.o
 # -Wl,-z,defs
 release:
-	@(CC) $(O_LEVEL_RELEASE) $(FLAGS) -c main.c -o main.o
+	@$(CC) $(O_LEVEL_RELEASE) $(FLAGS) -c main.c -o main.o
 	@nasm -Werror -f elf64 my_printf.asm -o my_printf.o
-	@(CC) -o my_printf my_printf.o main.o
+	@$(CC) -o my_printf my_printf.o main.o
 #-L/lib64 -lpthread -lm
 #-Wl,-z,defs
 

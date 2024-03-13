@@ -28,7 +28,7 @@ MIDDLE_BIT_64           equ 0x0000000080000000
         lea rsi, [rbp - 40 - BUFFER_SIZE_MP]
         mov rdx, r9
         syscall
-        add rcx, r9
+        add rbx, r9
         xor r9, r9
 %endmacro
 
@@ -52,7 +52,7 @@ MIDDLE_BIT_64           equ 0x0000000080000000
         sub rdx, r9
         ; inc rdx
         ; inc rdx
-        add rcx, rdx
+        add rbx, rdx
         syscall
         mov r9, BUFFER_SIZE_MP
 %endmacro
@@ -89,7 +89,7 @@ my_printf:
         mov r12, rbp    ; pointer to arg in stack
         sub r12, 40
 
-        xor rcx, rcx
+        xor rbx, rbx
         while_loop_printf:
         mov r8b, byte [r10]
         test r8b, r8b
@@ -98,23 +98,30 @@ my_printf:
                 jne while_not_prst_my_printf ;//FIXME
                         ; %
                         mov r8b, [r10 + 1]
+
                         cmp r8b, '%'
                         je spec_proc_my_printf
-                                mov r13, [r12]
-                                add r12, 8
-                                ; fix r12
-                                lea rax, [rbp + 16 + 5 * 8]
-                                cmp r12, rbp
-                                cmove r12, rax
-                                ; jne r12_good_my_printf
-                                ;         lea r12, [rbp + 16 + 5 * 8]
-                                ; r12_good_my_printf:
-                                ;
-                        spec_proc_my_printf:
+
+                        cmp r8b, 'b'
+                        jb error_exit_my_printf
+
+                        cmp r8b, 'x'
+                        ja error_exit_my_printf
+
+                        mov r13, [r12]
+                        add r12, 8
+                        ; fix r12 ------------------
+                        lea rax, [rbp + 16 + 5 * 8]
+                        cmp r12, rbp
+                        cmove r12, rax
+                        ; jne r12_good_my_printf
+                        ;         lea r12, [rbp + 16 + 5 * 8]
+                        ; r12_good_my_printf:
+                        ; --------------------------
+
                         inc r10
                         movzx r8, byte [r10]
-                        lea rax, [r8 * 8]
-                        add rax, jump_table_my_printf
+                        lea rax, [r8 * 8 + jump_table_my_printf - 8 * 'b']
                         inc r10
                         mov rax, [rax]
                         jmp rax
@@ -132,7 +139,7 @@ my_printf:
 
         FLUSH_BUFFER_MY_PRINTF
 
-        mov rax, rcx
+        mov rax, rbx
         error_exit_my_printf:
 
         mov rsp, rbp
@@ -161,8 +168,9 @@ ret
 ; r15 = -
 
 ; %%
-percent_jump_table_my_printf:
+spec_proc_my_printf:
         WRITE_TO_BUFFER_MY_PRINTF{'%'}
+        inc r10
 jmp try_flush_my_printf
 ;
 
@@ -190,7 +198,7 @@ str_jump_table_my_printf:
         mov rsi, r13
         mov rdx, r9     ; r9 here is from strlen
         syscall
-        add rcx, r9
+        add rbx, r9
         xor r9, r9
 jmp while_loop_printf   ; not try flush because buf already flused
 ;
@@ -205,11 +213,11 @@ bin_jump_table_my_printf:
         WRITE_TO_BUFFER_MY_PRINTF{r8b}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 
-        mov r8, rcx     ; r8 here just tmp
+        ; mov r8, rcx     ; r8 here just tmp
         lzcnt rcx, r13
         shl r13, cl
         mov r14, rcx
-        mov rcx, r8
+        ; mov rcx, r8
 
         neg r14
         add r14, 64
@@ -255,7 +263,6 @@ oct_jump_table_my_printf:
         no_leading_one_oct_table_my_printf:
         shl r13, 1
 
-        mov r8, rcx     ; r8 here just tmp
         lzcnt rcx, r13  ; number of leading zeroes
         mov rax, rcx
         xor rdx, rdx
@@ -266,7 +273,6 @@ oct_jump_table_my_printf:
         mov rcx, rax
         shl r13, cl     ; r13 = arg shifted to needed pos
         mov r14, rdi    ; r14 = number of triples removed
-        mov rcx, r8
 
         ; 21 triples
 
@@ -300,7 +306,6 @@ hex_jump_table_my_printf:
         WRITE_TO_BUFFER_MY_PRINTF{r8b}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 
-        mov r8, rcx
         lzcnt rcx, r13
         mov r14, rcx
         shr r14, 2
@@ -308,7 +313,6 @@ hex_jump_table_my_printf:
         shr rcx, 2
         shl rcx, 2
         shl r13, cl
-        mov rcx, r8
 
         neg r14
         add r14, 16
@@ -386,9 +390,6 @@ jmp error_exit_my_printf
 
 .rodata:
 jump_table_my_printf:
-dq 37 dup               (error_jump_table_my_printf)
-dq                      percent_jump_table_my_printf
-dq 60 dup               (error_jump_table_my_printf)
 dq                      bin_jump_table_my_printf
 dq                      char_jump_table_my_printf
 dq                      dec_jump_table_my_printf
@@ -398,4 +399,3 @@ dq 's' - 'o' - 1 dup    (error_jump_table_my_printf)
 dq                      str_jump_table_my_printf
 dq 'x' - 's' - 1 dup    (error_jump_table_my_printf)
 dq                      hex_jump_table_my_printf
-dq 134 dup              (error_jump_table_my_printf) ; // FIXME - above
