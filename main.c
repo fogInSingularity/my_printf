@@ -1,20 +1,12 @@
 #include <stdio.h>
 
-// #include <stdio.h>
-int my_printf(const char* str, ...);
+int my_printf(const char* str, ...) __attribute__((format(printf, 1, 2)));
 
 int main(void) {
-  unsigned long long bebra = 16;
-  my_printf("%o", bebra);
-  // unsigned long long zero = 0;
-  // zero = ~zero;
-  // printf("%x", -2);
-  // printf("%llo", zero);
-
-  // int check = my_printf("abc%c%b%s%%", 'l', bebra, "hello");
-  // my_printf("a%c%s%b%%", 'a', "hello", bebra);
-
-  // printf("my_printf ret: %d\n", check);
-
+  // long long bebra = -1;
+  // my_printf("bebra%dbebra\n", bebra);
+  
+  my_printf("%o\n%d %s %x %d%%%c%b\n%d %s %x %d%%%c%b\n", -1, -1, "love", 3802, 100, 33, 127,
+                                                                         -1, "love", 3802, 100, 33, 127);
   return 0;
 }
