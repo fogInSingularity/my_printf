@@ -15,6 +15,9 @@ TOP_HALF                equ 0xffffffff00000000
 TOP_HALF_AND_BIT        equ 0xffffffff80000000
 MIDDLE_BIT_64           equ 0x0000000080000000
 
+ERROR_UNKNOWN_SPEC_MY_PRINTF            equ -1
+ERROR_UNKNOWN_NULL_STR_MY_PRINTF        equ -2
+
 %macro TRY_TO_FLUSH_BUFFER_MY_PRINTF 0
         cmp r9, BUFFER_SIZE_MP - 1
         jb %%no_flush
@@ -75,6 +78,7 @@ my_printf:
 
         ; save args
         sub rsp, 5 * 8 + BUFFER_SIZE_MP
+        and rsp, -16    ; stack alignment by 16 (for syscalls)
 
         mov qword [rbp - 8], r9
         mov qword [rbp - 16], r8
@@ -90,23 +94,23 @@ my_printf:
         sub r12, 40
 
         xor rbx, rbx
-        while_loop_printf:
+        .main_while_loop:
         mov r8b, byte [r10]
         test r8b, r8b
-        je while_break_my_printf
+        je .break_main_while
                 cmp r8b, '%'
-                jne while_not_prst_my_printf ;//FIXME
+                jne .if_prst ;//FIXME
                         ; %
                         mov r8b, [r10 + 1]
 
                         cmp r8b, '%'
-                        je spec_proc_my_printf
+                        je .proc_spec
 
                         cmp r8b, 'b'
-                        jb error_exit_my_printf
+                        jb .errror_exit
 
                         cmp r8b, 'x'
-                        ja error_exit_my_printf
+                        ja .errror_exit
 
                         mov r13, [r12]
                         add r12, 8
@@ -114,33 +118,30 @@ my_printf:
                         lea rax, [rbp + 16 + 5 * 8]
                         cmp r12, rbp
                         cmove r12, rax
-                        ; jne r12_good_my_printf
-                        ;         lea r12, [rbp + 16 + 5 * 8]
-                        ; r12_good_my_printf:
                         ; --------------------------
 
                         inc r10
                         movzx r8, byte [r10]
-                        lea rax, [r8 * 8 + jump_table_my_printf - 8 * 'b']
+                        lea rax, [r8 * 8 + .jump_table - 8 * 'b']
                         inc r10
                         mov rax, [rax]
                         jmp rax
-                while_not_prst_my_printf:
+                .if_prst:
 
                 ; write to buff
                 WRITE_TO_BUFFER_MY_PRINTF{r8b}
                 inc r10
 
                 ; flush buf <- jump out table
-                try_flush_my_printf:
+                .try_to_flush:
                 TRY_TO_FLUSH_BUFFER_MY_PRINTF
-                jmp while_loop_printf
-        while_break_my_printf:
+                jmp .main_while_loop
+        .break_main_while:
+
 
         FLUSH_BUFFER_MY_PRINTF
-
         mov rax, rbx
-        error_exit_my_printf:
+        .errror_exit:
 
         mov rsp, rbp
         pop rbp
@@ -168,29 +169,33 @@ ret
 ; r15 = -
 
 ; %%
-spec_proc_my_printf:
+.proc_spec:
         WRITE_TO_BUFFER_MY_PRINTF{'%'}
         inc r10
-jmp try_flush_my_printf
+jmp .try_to_flush
 ;
 
 ; %c
-char_jump_table_my_printf:
+.char_spec:
         WRITE_TO_BUFFER_MY_PRINTF{r13b}
-jmp try_flush_my_printf
+jmp .try_to_flush
 ;
-
+;// ответить на вопрос по выызову функции
+;// что происходит когда вызов функции
+;// почему плачет 3 кремниевыми слезами
 ; %s
-str_jump_table_my_printf:
+.str_spec: ;//FIXME
+        test r13, r13
+        je .error_null_str
         ; flush
         FLUSH_BUFFER_MY_PRINTF
         ; strlen
         xor r9, r9
-        while_strlen_my_printf:
-        inc r9
-        mov r8b, [r13 + r9 - 1]
-        test r8b, r8b
-        jne while_strlen_my_printf
+        .while_strlen:
+                inc r9
+                mov r8b, [r13 + r9 - 1]
+                test r8b, r8b
+        jne .while_strlen
         dec r9
         ; strout:
         mov rax, SYS_WRITE
@@ -200,11 +205,11 @@ str_jump_table_my_printf:
         syscall
         add rbx, r9
         xor r9, r9
-jmp while_loop_printf   ; not try flush because buf already flused
+jmp .main_while_loop   ; not try flush because buf already flused
 ;
 
 ; %b
-bin_jump_table_my_printf:
+.bin_spec:
         mov r8b, '0'
         WRITE_TO_BUFFER_MY_PRINTF{r8b}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
@@ -213,17 +218,15 @@ bin_jump_table_my_printf:
         WRITE_TO_BUFFER_MY_PRINTF{r8b}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 
-        ; mov r8, rcx     ; r8 here just tmp
         lzcnt rcx, r13
         shl r13, cl
         mov r14, rcx
-        ; mov rcx, r8
 
         neg r14
         add r14, 64
         ; r14 = number of sugn bits
 
-        do_while_loop_bin_table_my_printf:
+        .while_loop_bin_spec:
                 mov r8, r13
                 mov rax, MOST_SIGNIF_BIT_64
                 and r8, rax
@@ -236,12 +239,12 @@ bin_jump_table_my_printf:
                 shl r13, 1
         dec r14
         test r14, r14
-        jne do_while_loop_bin_table_my_printf
-jmp try_flush_my_printf
+        jne .while_loop_bin_spec
+jmp .try_to_flush
 ;
 
 ; %o
-oct_jump_table_my_printf:
+.oct_spec: ;//FIXME
         mov r8b, '0'
         WRITE_TO_BUFFER_MY_PRINTF{r8b}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
@@ -255,12 +258,12 @@ oct_jump_table_my_printf:
         rol r8, 1
 
         test r8, r8
-        je no_leading_one_oct_table_my_printf
+        je .no_leading_1
                 add r8, '0'
 
                 WRITE_TO_BUFFER_MY_PRINTF{r8b}
                 TRY_TO_FLUSH_BUFFER_MY_PRINTF
-        no_leading_one_oct_table_my_printf:
+        .no_leading_1:
         shl r13, 1
 
         lzcnt rcx, r13  ; number of leading zeroes
@@ -279,7 +282,7 @@ oct_jump_table_my_printf:
         neg r14
         add r14, 21
 
-        do_while_loop_oct_table_my_printf:
+        .while_loop_oct:
                 mov r8, r13
                 mov rax, MOST_SIGNIF3_BIT_64
                 and r8, rax
@@ -292,12 +295,12 @@ oct_jump_table_my_printf:
                 shl r13, 3
         dec r14
         test r14, r14
-        jne do_while_loop_oct_table_my_printf
-jmp try_flush_my_printf
+        jne .while_loop_oct
+jmp .try_to_flush
 ;
 
 ; %x
-hex_jump_table_my_printf:
+.hex_spec:
         mov r8b, '0'
         WRITE_TO_BUFFER_MY_PRINTF{r8b}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
@@ -317,7 +320,7 @@ hex_jump_table_my_printf:
         neg r14
         add r14, 16
 
-        do_while_loop_hex_table_my_printf:
+        .while_loop_hex:
                 mov r8, r13
                 mov rax, MOST_SIGNIF4_BIT_64
                 and r8, rax
@@ -336,36 +339,26 @@ hex_jump_table_my_printf:
                 shl r13, 4
         dec r14
         test r14, r14
-        jne do_while_loop_hex_table_my_printf
-jmp try_flush_my_printf
+        jne .while_loop_hex
+jmp .try_to_flush
 ;
 
 ; %d
-dec_jump_table_my_printf:
-        mov r8, TOP_HALF_AND_BIT
-        mov rax, r13
-        and rax, r8
-        mov r8, MIDDLE_BIT_64
-        movsx rdx, r13d
-
-        cmp rax, r8
-        cmove r13, rdx
-        ; jne fuck_32_bit_dec_my_printf
-        ;         movsx r13, r13d
-        ; fuck_32_bit_dec_my_printf:
+.dec_spec:
+        movsx r13, r13d
 
         mov r8, r13
         mov rax, MOST_SIGNIF_BIT_64
         test r8, rax
-        je no_minus_dec_my_printf
+        je .if_minus_dec
                 TRY_TO_FLUSH_BUFFER_MY_PRINTF
                 WRITE_TO_BUFFER_MY_PRINTF{'-'}
                 neg r13
-        no_minus_dec_my_printf:
+        .if_minus_dec:
         FLUSH_BUFFER_MY_PRINTF
 
         mov r9, BUFFER_SIZE_MP
-        do_while_loop_dec_table_my_printf:
+        .while_loop_dec:
                 mov rax, r13
                 mov rsi, 10
                 xor rdx, rdx
@@ -375,27 +368,35 @@ dec_jump_table_my_printf:
                 mov r13, rax
                 WRITE_TO_BUF_REV_MY_PRINTF{r8b}
         test r13, r13
-        jne do_while_loop_dec_table_my_printf
+        jne .while_loop_dec
 
         FLUSH_BUF_REV_MY_PRINTF
         xor r9, r9
-jmp while_loop_printf
+jmp .main_while_loop
 ;
 
-; error
-error_jump_table_my_printf:
-        mov rax, -1
-jmp error_exit_my_printf
+; error spec
+.error_invalid_spec:
+        FLUSH_BUFFER_MY_PRINTF
+        mov rax, ERROR_UNKNOWN_SPEC_MY_PRINTF
+jmp .errror_exit
+;
+
+; error null
+.error_null_str:
+        FLUSH_BUFFER_MY_PRINTF
+        mov rax, ERROR_UNKNOWN_SPEC_MY_PRINTF
+jmp .errror_exit
 ;
 
 .rodata:
-jump_table_my_printf:
-dq                      bin_jump_table_my_printf
-dq                      char_jump_table_my_printf
-dq                      dec_jump_table_my_printf
-dq 'o' - 'd' - 1 dup    (error_jump_table_my_printf)
-dq                      oct_jump_table_my_printf
-dq 's' - 'o' - 1 dup    (error_jump_table_my_printf)
-dq                      str_jump_table_my_printf
-dq 'x' - 's' - 1 dup    (error_jump_table_my_printf)
-dq                      hex_jump_table_my_printf
+.jump_table:
+dq                      .bin_spec
+dq                      .char_spec
+dq                      .dec_spec
+dq 'o' - 'd' - 1 dup    (.error_invalid_spec)
+dq                      .oct_spec
+dq 's' - 'o' - 1 dup    (.error_invalid_spec)
+dq                      .str_spec
+dq 'x' - 's' - 1 dup    (.error_invalid_spec)
+dq                      .hex_spec
