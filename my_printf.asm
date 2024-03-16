@@ -1,22 +1,49 @@
-; int my_prinf(const char* str, ...);
-; rdi = str
-; rsi, rdx, rcx, r8, r9, stack = va_args
-; xmm0, .., xmm7 = float args
-; rax = number of floats
+; %define BIN_PREFIX_ON 1
+; %define OCT_PREFIX_ON 1
+; %define HEX_PREFIX_ON 1
+
+;================================================
+; use of registers:
+; rax = tmp
+; rbx = count how many symbols where writen
+; rcx = tmp
+; rdx = tmp
+; rsi = tmp
+; rdi = tmp
+; rbp = !
+; rsp = !
+; r8  = tmp (most of the time used for char)
+; r9  = symbols in buf
+; r10 = moving str pointer (1th arg)
+; r11 = tmp
+; r12 = pointer on arg in stack
+; r13 = pass arg to table
+; r14 = tmp
+; r15 = number of floats
+;================================================
+
+; //FIXME
+;// ответить на вопрос по выызову функции
+;// что происходит когда вызов функции
+;// почему плачет 3 кремниевыми слезами
+
 bits 64
 
 SYS_WRITE               equ 0x1
 STDOUT_DISCR            equ 0x1
 BUFFER_SIZE_MP          equ 32
-MOST_SIGNIF_BIT_64      equ 0x8000000000000000
-MOST_SIGNIF3_BIT_64     equ 0xe000000000000000
-MOST_SIGNIF4_BIT_64     equ 0xf000000000000000
-TOP_HALF                equ 0xffffffff00000000
-TOP_HALF_AND_BIT        equ 0xffffffff80000000
-MIDDLE_BIT_64           equ 0x0000000080000000
+MIDDLE_BUF_SIZE_MP      equ 32
 
-ERROR_UNKNOWN_SPEC_MY_PRINTF            equ -1
-ERROR_UNKNOWN_NULL_STR_MY_PRINTF        equ -2
+kMostSignifBit64        equ 0x8000000000000000
+kMostSignif3Bits64      equ 0xe000000000000000
+kMostSignif4Bits64      equ 0xf000000000000000
+; TOP_HALF                equ 0xffffffff00000000
+; TOP_HALF_AND_BIT        equ 0xffffffff80000000
+; MIDDLE_BIT_64           equ 0x0000000080000000
+
+kErrorUnknownSpec_MyPrintf              equ -1
+KErrorNullStr_MyPrintf                  equ -2
+kErrorFloatPassedUnsupported_MyPrintf   equ -3
 
 %macro TRY_TO_FLUSH_BUFFER_MY_PRINTF 0
         cmp r9, BUFFER_SIZE_MP - 1
@@ -53,8 +80,6 @@ ERROR_UNKNOWN_NULL_STR_MY_PRINTF        equ -2
         lea rsi, [rbp + r9 - 40 - BUFFER_SIZE_MP]
         mov rdx, BUFFER_SIZE_MP
         sub rdx, r9
-        ; inc rdx
-        ; inc rdx
         add rbx, rdx
         syscall
         mov r9, BUFFER_SIZE_MP
@@ -65,8 +90,9 @@ ERROR_UNKNOWN_NULL_STR_MY_PRINTF        equ -2
         dec r9
 %endmacro
 
-global my_printf
-my_printf:
+;====================================================================
+global MyPrintf
+MyPrintf:
         push rbx
         push r12
         push r13
@@ -77,7 +103,7 @@ my_printf:
         mov rbp, rsp
 
         ; save args
-        sub rsp, 5 * 8 + BUFFER_SIZE_MP
+        sub rsp, 5 * 8 + BUFFER_SIZE_MP ;+ MIDDLE_BUF_SIZE_MP
         and rsp, -16    ; stack alignment by 16 (for syscalls)
 
         mov qword [rbp - 8], r9
@@ -86,12 +112,16 @@ my_printf:
         mov qword [rbp - 32], rdx
         mov qword [rbp - 40], rsi
         ; rbp - 40 - buf size = buffer
+        ; rbp - 40 - buf size - middle buf size = middle buffer
 
         xor r9, r9      ; symbols in buffer
         mov r10, rdi    ; const char* str
-        mov r11, rax    ; number of floats
+        mov r15, rax    ; number of floats
         mov r12, rbp    ; pointer to arg in stack
         sub r12, 40
+
+        test r15, r15   ; number of floats ? 0
+        jne .error_float_passed_unsupported
 
         xor rbx, rbx
         .main_while_loop:
@@ -99,18 +129,35 @@ my_printf:
         test r8b, r8b
         je .break_main_while
                 cmp r8b, '%'
-                jne .if_prst ;//FIXME
+                jne .if_prst ;
                         ; %
                         mov r8b, [r10 + 1]
+
+                        ; cmp r8b, '%'
+                        ; je .proc_spec
+
+                        ; cmp r8b, 'b'
+                        ; jb .errror_exit
+
+                        ; cmp r8b, 'x'
+                        ; ja .errror_exit
+
 
                         cmp r8b, '%'
                         je .proc_spec
 
+                        mov rax, .default_spec
+
                         cmp r8b, 'b'
-                        jb .errror_exit
+                        mov rcx, .error_invalid_spec
+                        cmovb rax, rcx
 
                         cmp r8b, 'x'
-                        ja .errror_exit
+                        mov rcx, .error_invalid_spec
+                        cmova rax, rcx
+
+                        jmp rax
+                        .default_spec:
 
                         mov r13, [r12]
                         add r12, 8
@@ -122,7 +169,7 @@ my_printf:
 
                         inc r10
                         movzx r8, byte [r10]
-                        lea rax, [r8 * 8 + .jump_table - 8 * 'b']
+                        lea rax, [(r8 - 'b') * 8 + .jump_table]
                         inc r10
                         mov rax, [rax]
                         jmp rax
@@ -139,9 +186,9 @@ my_printf:
         .break_main_while:
 
 
-        FLUSH_BUFFER_MY_PRINTF
         mov rax, rbx
         .errror_exit:
+        FLUSH_BUFFER_MY_PRINTF
 
         mov rsp, rbp
         pop rbp
@@ -151,72 +198,92 @@ my_printf:
         pop r12
         pop rbx
 ret
-; rax = tmp
-; rbx = -
-; rcx = count how many symbols where writen
-; rdx = tmp
-; rsi = tmp
-; rdi = tmp
-; rbp = dont use
-; rsp = dont use
-; r8  = tmp (most of the time used for char)
-; r9  = symbols in buf
-; r10 = moving str pointer (1th arg)
-; r11 = number of floats
-; r12 = pointer on arg in stack
-; r13 = pass arg to table
-; r14 = -
-; r15 = -
+;====================================================================
 
-; %%
+; %% --------------------------------------------
 .proc_spec:
         WRITE_TO_BUFFER_MY_PRINTF{'%'}
         inc r10
+        inc r10
 jmp .try_to_flush
-;
 
-; %c
+; %c --------------------------------------------
 .char_spec:
         WRITE_TO_BUFFER_MY_PRINTF{r13b}
 jmp .try_to_flush
-;
-;// ответить на вопрос по выызову функции
-;// что происходит когда вызов функции
-;// почему плачет 3 кремниевыми слезами
-; %s
+
+; %s --------------------------------------------
 .str_spec: ;//FIXME
         test r13, r13
         je .error_null_str
-        ; flush
-        FLUSH_BUFFER_MY_PRINTF
-        ; strlen
-        xor r9, r9
-        .while_strlen:
-                inc r9
-                mov r8b, [r13 + r9 - 1]
+
+        jmp .strlen     ; rcx = strlen
+        .out_strlen:
+        mov r14, rcx
+
+        lea r8, [r9 + r14]
+        cmp r8, BUFFER_SIZE_MP
+        jb .str_fit_in_part_buf
+
+        cmp r14, BUFFER_SIZE_MP
+        jb .str_fit_in_buf
+
+        jmp .str_dont_fit
+
+        .back_to_str_spec:
+jmp .main_while_loop   ; not try flush because buf already flused
+
+; r13 = str
+.strlen:
+        mov rcx, r13
+        .do_while_strlen:
+                mov r8b, [rcx]
+                inc rcx
                 test r8b, r8b
-        jne .while_strlen
-        dec r9
-        ; strout:
+        jne .do_while_strlen
+        sub rcx, r13
+        dec rcx
+jmp .out_strlen
+
+; r14 = strlen, r13 = arg (changes)
+.str_fit_in_part_buf:
+        test r14, r14
+        je .skip_do_while_str_fit_prt
+                .do_while_str_fit_prt:
+                        mov r8b, [r13]
+                        WRITE_TO_BUFFER_MY_PRINTF{r8b}
+                        inc r13
+                test r8b, r8b
+                jne .do_while_str_fit_prt
+        .skip_do_while_str_fit_prt:
+jmp .back_to_str_spec
+
+; r14 = strlen, r13 = arg (changes)
+.str_fit_in_buf:
+        FLUSH_BUFFER_MY_PRINTF
+        jmp .str_fit_in_part_buf
+jmp .back_to_str_spec
+
+; r14 = strlen, r13 = arg
+.str_dont_fit:
+        FLUSH_BUFFER_MY_PRINTF
         mov rax, SYS_WRITE
         mov rdi, STDOUT_DISCR
         mov rsi, r13
-        mov rdx, r9     ; r9 here is from strlen
+        mov rdx, r14
         syscall
-        add rbx, r9
-        xor r9, r9
-jmp .main_while_loop   ; not try flush because buf already flused
-;
+        add rbx, r14
+jmp .back_to_str_spec
 
-; %b
+; %b --------------------------------------------
 .bin_spec:
-        mov r8b, '0'
-        WRITE_TO_BUFFER_MY_PRINTF{r8b}
+%ifdef BIN_PREFIX_ON
+        WRITE_TO_BUFFER_MY_PRINTF{'0'}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 
-        mov r8b, 'b'
-        WRITE_TO_BUFFER_MY_PRINTF{r8b}
+        WRITE_TO_BUFFER_MY_PRINTF{'b'}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
+%endif
 
         lzcnt rcx, r13
         shl r13, cl
@@ -224,11 +291,11 @@ jmp .main_while_loop   ; not try flush because buf already flused
 
         neg r14
         add r14, 64
-        ; r14 = number of sugn bits
+        ; r14 = number of sign bits
 
         .while_loop_bin_spec:
                 mov r8, r13
-                mov rax, MOST_SIGNIF_BIT_64
+                mov rax, kMostSignifBit64
                 and r8, rax
                 rol r8, 1
                 add r8, '0'
@@ -241,19 +308,17 @@ jmp .main_while_loop   ; not try flush because buf already flused
         test r14, r14
         jne .while_loop_bin_spec
 jmp .try_to_flush
-;
 
-; %o
+; %o --------------------------------------------
 .oct_spec: ;//FIXME
-        mov r8b, '0'
-        WRITE_TO_BUFFER_MY_PRINTF{r8b}
+%ifdef OCT_PREFIX_ON
+        WRITE_TO_BUFFER_MY_PRINTF{'0'}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 
-        mov r8b, 'o'
-        WRITE_TO_BUFFER_MY_PRINTF{r8b}
+        WRITE_TO_BUFFER_MY_PRINTF{'o'}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
-
-        mov r8, MOST_SIGNIF_BIT_64
+%endif
+        mov r8, kMostSignifBit64
         and r8, r13
         rol r8, 1
 
@@ -284,7 +349,7 @@ jmp .try_to_flush
 
         .while_loop_oct:
                 mov r8, r13
-                mov rax, MOST_SIGNIF3_BIT_64
+                mov rax, kMostSignif3Bits64
                 and r8, rax
                 rol r8, 3
                 add r8, '0'
@@ -297,17 +362,16 @@ jmp .try_to_flush
         test r14, r14
         jne .while_loop_oct
 jmp .try_to_flush
-;
 
-; %x
+; %x --------------------------------------------
 .hex_spec:
-        mov r8b, '0'
-        WRITE_TO_BUFFER_MY_PRINTF{r8b}
+%ifdef HEX_PREFIX_ON
+        WRITE_TO_BUFFER_MY_PRINTF{'0'}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 
-        mov r8b, 'x'
-        WRITE_TO_BUFFER_MY_PRINTF{r8b}
+        WRITE_TO_BUFFER_MY_PRINTF{'x'}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
+%endif
 
         lzcnt rcx, r13
         mov r14, rcx
@@ -322,7 +386,7 @@ jmp .try_to_flush
 
         .while_loop_hex:
                 mov r8, r13
-                mov rax, MOST_SIGNIF4_BIT_64
+                mov rax, kMostSignif4Bits64
                 and r8, rax
                 rol r8, 4
 
@@ -341,14 +405,19 @@ jmp .try_to_flush
         test r14, r14
         jne .while_loop_hex
 jmp .try_to_flush
-;
 
-; %d
+; base 2^n --------------------------------------
+
+; .general_base_2_spec:
+
+; jmp .try_to_flush
+
+; %d --------------------------------------------
 .dec_spec:
         movsx r13, r13d
 
         mov r8, r13
-        mov rax, MOST_SIGNIF_BIT_64
+        mov rax, kMostSignifBit64
         test r8, rax
         je .if_minus_dec
                 TRY_TO_FLUSH_BUFFER_MY_PRINTF
@@ -373,23 +442,26 @@ jmp .try_to_flush
         FLUSH_BUF_REV_MY_PRINTF
         xor r9, r9
 jmp .main_while_loop
-;
 
-; error spec
+; error spec ------------------------------------
 .error_invalid_spec:
-        FLUSH_BUFFER_MY_PRINTF
-        mov rax, ERROR_UNKNOWN_SPEC_MY_PRINTF
+        mov rax, kErrorUnknownSpec_MyPrintf
 jmp .errror_exit
-;
 
-; error null
+; error null ------------------------------------
 .error_null_str:
-        FLUSH_BUFFER_MY_PRINTF
-        mov rax, ERROR_UNKNOWN_SPEC_MY_PRINTF
+        mov rax, KErrorNullStr_MyPrintf
 jmp .errror_exit
-;
+
+; error float passed    ## unsupported ##   -----
+.error_float_passed_unsupported:
+        mov rax, kErrorFloatPassedUnsupported_MyPrintf
+jmp .errror_exit
+;====================================================================
 
 .rodata:
+.conv_table:    db '0123456789abcdef'
+
 .jump_table:
 dq                      .bin_spec
 dq                      .char_spec

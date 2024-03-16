@@ -43,13 +43,3 @@ release:
 
 remove:
 	rm my_printf.o main.o
-
-# all:
-# 	@gcc $(O_LEVEL) $(ASAN_FLAGS) $(FLAGS) -c main.c -o main.o
-# 	@nasm -f elf64 my_printf.asm -o my_printf.o
-# 	@nasm -f elf64 entry.asm -o entry.o
-# 	@ld main.o my_printf.o entry.o -o my_printf
-#-L/lib64 -lpthread -lm
-
-# FLAGS = -Wall -Wextra -no-pie
-# ASAN_FLAGS = -fsanitize=address
