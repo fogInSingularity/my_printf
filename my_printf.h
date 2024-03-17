@@ -1,7 +1,7 @@
 #ifndef MY_PRINTF_H_
 #define MY_PRINTF_H_
 
-int MyPrintf(const char* str, ...) __attribute__((format(printf, 1, 2)));
+int MyPrintf(const char* format, ...) __attribute__((format(printf, 1, 2)));
 // expected register values:
 // rdi = str
 // rsi, rdx, rcx, r8, r9, stack = va_args
