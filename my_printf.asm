@@ -19,7 +19,7 @@
 ; r12 = pointer on arg in stack
 ; r13 = pass arg to table
 ; r14 = tmp
-; r15 = number of floats
+; r15 = tmp
 ;================================================
 
 ; //FIXME
@@ -35,11 +35,6 @@ BUFFER_SIZE_MP          equ 32
 MIDDLE_BUF_SIZE_MP      equ 32
 
 kMostSignifBit64        equ 0x8000000000000000
-kMostSignif3Bits64      equ 0xe000000000000000
-kMostSignif4Bits64      equ 0xf000000000000000
-; TOP_HALF                equ 0xffffffff00000000
-; TOP_HALF_AND_BIT        equ 0xffffffff80000000
-; MIDDLE_BIT_64           equ 0x0000000080000000
 
 kErrorUnknownSpec_MyPrintf              equ -1
 KErrorNullStr_MyPrintf                  equ -2
@@ -53,6 +48,8 @@ kErrorFloatPassedUnsupported_MyPrintf   equ -3
 %endmacro
 
 %macro FLUSH_BUFFER_MY_PRINTF 0
+        push rcx
+        push r11
         mov rax, SYS_WRITE
         mov rdi, STDOUT_DISCR
         lea rsi, [rbp - 40 - BUFFER_SIZE_MP]
@@ -60,6 +57,8 @@ kErrorFloatPassedUnsupported_MyPrintf   equ -3
         syscall
         add rbx, r9
         xor r9, r9
+        pop r11
+        pop rcx
 %endmacro
 
 %macro WRITE_TO_BUFFER_MY_PRINTF 1
@@ -75,6 +74,8 @@ kErrorFloatPassedUnsupported_MyPrintf   equ -3
 %endmacro
 
 %macro FLUSH_BUF_REV_MY_PRINTF 0
+        push rcx
+        push r11
         mov rax, SYS_WRITE
         mov rdi, STDOUT_DISCR
         lea rsi, [rbp + r9 - 40 - BUFFER_SIZE_MP]
@@ -83,6 +84,8 @@ kErrorFloatPassedUnsupported_MyPrintf   equ -3
         add rbx, rdx
         syscall
         mov r9, BUFFER_SIZE_MP
+        pop r11
+        pop rcx
 %endmacro
 
 %macro WRITE_TO_BUF_REV_MY_PRINTF 1
@@ -103,7 +106,7 @@ MyPrintf:
         mov rbp, rsp
 
         ; save args
-        sub rsp, 5 * 8 + BUFFER_SIZE_MP ;+ MIDDLE_BUF_SIZE_MP
+        sub rsp, 6 * 8 + BUFFER_SIZE_MP ;+ MIDDLE_BUF_SIZE_MP
         and rsp, -16    ; stack alignment by 16 (for syscalls)
 
         mov qword [rbp - 8], r9
@@ -111,8 +114,8 @@ MyPrintf:
         mov qword [rbp - 24], rcx
         mov qword [rbp - 32], rdx
         mov qword [rbp - 40], rsi
-        ; rbp - 40 - buf size = buffer
-        ; rbp - 40 - buf size - middle buf size = middle buffer
+        ; rbp - 48 - buf size = buffer
+        ; rbp - 48 - buf size - middle buf size = middle buffer
 
         xor r9, r9      ; symbols in buffer
         mov r10, rdi    ; const char* str
@@ -285,32 +288,11 @@ jmp .back_to_str_spec
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 %endif
 
-        lzcnt rcx, r13
-        shl r13, cl
-        mov r14, rcx
-
-        neg r14
-        add r14, 64
-        ; r14 = number of sign bits
-
-        .while_loop_bin_spec:
-                mov r8, r13
-                mov rax, kMostSignifBit64
-                and r8, rax
-                rol r8, 1
-                add r8, '0'
-
-                WRITE_TO_BUFFER_MY_PRINTF{r8b}
-                TRY_TO_FLUSH_BUFFER_MY_PRINTF
-
-                shl r13, 1
-        dec r14
-        test r14, r14
-        jne .while_loop_bin_spec
-jmp .try_to_flush
+        mov r11, 1
+jmp .general_base_2_spec
 
 ; %o --------------------------------------------
-.oct_spec: ;//FIXME
+.oct_spec:
 %ifdef OCT_PREFIX_ON
         WRITE_TO_BUFFER_MY_PRINTF{'0'}
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
@@ -331,37 +313,8 @@ jmp .try_to_flush
         .no_leading_1:
         shl r13, 1
 
-        lzcnt rcx, r13  ; number of leading zeroes
-        mov rax, rcx
-        xor rdx, rdx
-        mov rsi, 3
-        div rsi
-        mov rdi, rax    ; rdi = number of triples
-        mul rsi         ; rax = bits to shift
-        mov rcx, rax
-        shl r13, cl     ; r13 = arg shifted to needed pos
-        mov r14, rdi    ; r14 = number of triples removed
-
-        ; 21 triples
-
-        neg r14
-        add r14, 21
-
-        .while_loop_oct:
-                mov r8, r13
-                mov rax, kMostSignif3Bits64
-                and r8, rax
-                rol r8, 3
-                add r8, '0'
-                ; output
-                WRITE_TO_BUFFER_MY_PRINTF{r8b}
-                TRY_TO_FLUSH_BUFFER_MY_PRINTF
-                ;
-                shl r13, 3
-        dec r14
-        test r14, r14
-        jne .while_loop_oct
-jmp .try_to_flush
+        mov r11, 3
+jmp .general_base_2_spec
 
 ; %x --------------------------------------------
 .hex_spec:
@@ -373,44 +326,57 @@ jmp .try_to_flush
         TRY_TO_FLUSH_BUFFER_MY_PRINTF
 %endif
 
-        lzcnt rcx, r13
-        mov r14, rcx
-        shr r14, 2
-
-        shr rcx, 2
-        shl rcx, 2
-        shl r13, cl
-
-        neg r14
-        add r14, 16
-
-        .while_loop_hex:
-                mov r8, r13
-                mov rax, kMostSignif4Bits64
-                and r8, rax
-                rol r8, 4
-
-                mov rax, '0'
-                mov rdx, 'a' - 10
-                cmp r8, 10
-                cmovae rax, rdx
-
-                add r8, rax
-
-                WRITE_TO_BUFFER_MY_PRINTF{r8b}
-                TRY_TO_FLUSH_BUFFER_MY_PRINTF
-
-                shl r13, 4
-        dec r14
-        test r14, r14
-        jne .while_loop_hex
-jmp .try_to_flush
+        mov r11, 4
+jmp .general_base_2_spec
 
 ; base 2^n --------------------------------------
 
-; .general_base_2_spec:
+; r13 = arg, r11 = k in 2^k+1
+.general_base_2_spec:
+        lzcnt rcx, r13  ; rcx = zero leading bits
+        mov rax, rcx
+        xor rdx, rdx
+        mov rsi, r11
+        div rsi
+        mov rdi, rax    ; rdi V
+        ; mov rsi, rax    ; rsi = number of groups of zeors
+        mul rsi ; ?
+        mov rcx, rax
 
-; jmp .try_to_flush
+        shl r13, cl
+        mov r14, rdi
+
+        mov rax, 64
+        xor rdx, rdx
+        div r11
+
+        neg r14
+        add r14, rax
+        ; r14 = number of groups
+
+        ; mask:
+        mov rcx, r11
+        mov r15, kMostSignifBit64
+        sar r15, cl
+        shl r15, 1
+
+
+        .while_loop_gen2k:
+                mov r8, r13
+                and r8, r15
+                mov rcx, r11
+                rol r8, cl
+
+                mov r8b, [.conv_table + r8]
+                WRITE_TO_BUFFER_MY_PRINTF{r8b}
+                TRY_TO_FLUSH_BUFFER_MY_PRINTF
+
+                mov rcx, r11
+                shl r13, cl
+        dec r14
+        test r14, r14
+        jne .while_loop_gen2k
+jmp .try_to_flush
 
 ; %d --------------------------------------------
 .dec_spec:
